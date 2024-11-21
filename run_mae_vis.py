@@ -10,7 +10,7 @@
 # https://github.com/facebookresearch/deit
 # https://github.com/facebookresearch/dino
 # --------------------------------------------------------'
-
+#from loguru import logger
 import argparse
 import datetime
 import numpy as np
@@ -103,6 +103,7 @@ def get_model(args):
 
 def main(args):
     print(args)
+    #logger.info(args)
 
     device = torch.device(args.device)
     cudnn.benchmark = True
@@ -118,7 +119,7 @@ def main(args):
     model.load_state_dict(checkpoint['model'])
     model.eval()
 
-
+    #logger.info(f"load model from {args.model_path}")
 
     transforms = DataAugmentationForMAE(args)
 
@@ -141,7 +142,7 @@ def main(args):
         # bool_masked_pos = bool_masked_pos.to(device, non_blocking=True).flatten(1).to(torch.bool)
         
         outputs = model(img_, bool_masked_pos)
-        #import pdb;pdb.set_trace()
+        import pdb;pdb.set_trace()
         #save original img
         mean = torch.as_tensor(IMAGENET_DEFAULT_MEAN).to(device)[None, :, None, None]
         std = torch.as_tensor(IMAGENET_DEFAULT_STD).to(device)[None, :, None, None]
@@ -181,6 +182,8 @@ def main(args):
         img_mask = rec_img * mask_
         img = ToPILImage()(img_mask[0, :])
         img.save(f"{args.save_path}/mask_img.jpg")
+
+        #logger.info(f"save image to {args.save_path}")
 
 if __name__ == '__main__':
     opts = get_args()

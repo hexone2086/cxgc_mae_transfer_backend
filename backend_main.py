@@ -3,18 +3,12 @@ import threading
 import cv2
 import numpy as np
 import zlib
+import time
 from loguru import logger
 
+from backend_infer import MAEVisualization
 from backend_require import require
 
-OUTPUT_DIR='./output'
-IMAGE_PATH= None
-MODEL_PATH='./model/checkpoint-1419.pth'
-REMAINING_IMG_PATH='./input/combined_image.npy'
-MASK_PATH='./input/mask_positions.npy'
-IMG_MEAN_PATH='./input/patch_means.npy'
-IMG_STD_PATH='./input/patch_stds.npy'
-MASK_RATIO=0.75
 
 received_data = None
 
@@ -25,31 +19,31 @@ def main():
     logger.info("start req thread")
     req_thread.start()
 
+    mae_infer = MAEVisualization(model_path='model/checkpoint-1599.pth',)
+
     while True:
         if len(req.buffer) > 0:
             received_data = req.buffer.pop()
 
-            mat1 = received_data['mat1']
-            mat2 = received_data['mat2']
-            bool_array = received_data['bool_array']
-            patch_means = received_data['patch_means']
-            patch_stds = received_data['patch_stds']
+            # 创建字典，用于送入推理模块
+            data_dict = {
+                'remaining_image': received_data['mat2'],
+                'mask': received_data['bool_array'],
+                'img_mean': received_data['patch_means'],
+                'img_std': received_data['patch_stds']
+            }
+            
+            logger.info("start infer")
+            output = mae_infer.infer(data_dict)
+            logger.info("infer completed")
 
-            np.save('./input/combined_image.npy', mat2)
-            np.save('./input/mask_positions.npy', bool_array)
-            np.save('./input/patch_means.npy', patch_means)
-            np.save('./input/patch_stds.npy', patch_stds)
-
-            # 创建运行命令，和eval.sh一样
-            try:
-                # 运行命令
-                result = subprocess.run(['bash', 'eval.sh'], check=True)
-                logger.error(f"exec result: {result}")
-            except subprocess.CalledProcessError as e:
-                logger.warning(f"exec failed and return: {e}")
-
-            # cv2.imshow('image', received_data['mat2'])
-            # cv2.waitKey(1)
+            output = output.transpose(0, 2, 3, 1) # 推理原始输出为 (bcz, 3, 224, 224)
+            n = output.shape[0]
+            for i in range(n):
+                # 限制 output 数值 0-1 防止溢出
+                output[i] = np.clip(output[i], 0, 1)
+                output[i] = (output[i] * 255).astype(np.uint8)
+                cv2.imwrite(f'./output/output_{i}.png', cv2.cvtColor(output[i], cv2.COLOR_RGB2BGR) )
         else:
             pass
 
