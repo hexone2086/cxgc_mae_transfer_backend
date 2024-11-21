@@ -73,15 +73,13 @@ class patch_generator:
         """将小块重新拼合成新图像，依据坐标信息进行拼接"""
         patch_height, patch_width = patch_size
         grid_height, grid_width = grid_size
-        new_image = np.zeros((grid_height * patch_height, grid_width * patch_width, 3), dtype=np.uint8)
+        new_image = np.zeros((1 * patch_height, len(selected_patches) * patch_width, 3), dtype=np.uint8)
         
         # 按照从上至下、从左至右的顺序排序
         selected_patches.sort(key=lambda x: (x[1][1], x[1][0]))
         
         for i, (patch, (x, y)) in enumerate(selected_patches):
-            new_x = i % grid_width
-            new_y = i // grid_width
-            new_image[new_y * patch_height:(new_y + 1) * patch_height, new_x * patch_width:(new_x + 1) * patch_width] = patch
+            new_image[:, i * patch_width:(i + 1) * patch_width, :] = patch
         return new_image
 
     def apply_mask_to_image(self, image: np.ndarray, mask: np.ndarray, patch_size: Tuple[int, int] = (16, 16)) -> np.ndarray:
@@ -143,37 +141,4 @@ class patch_generator:
         return masked_image, combined_image, patch_means, patch_stds, mask
 
 if __name__ == "__main__":
-    image_path = "ILSVRC2012_test_00078306.JPEG"  # 替换为你的输入图像路径
-    output_path = "output_image.jpg"  # 替换为你的输出图像路径
-    mask_positions_file = "mask_positions.pkl"  # 掩码位置保存文件
-
-    # 加载图像
-    image = cv2.imread(image_path)
-    if image is None:
-        raise ValueError("Failed to load image")
-    
-    # 创建 patch_generator 实例
-    pg = patch_generator()
-    
-    # 加载或初始化掩码位置
-    try:
-        pg.load_mask_positions(mask_positions_file)
-    except FileNotFoundError:
-        pg.initialize_default_mask_positions()
-        pg.save_mask_positions(mask_positions_file)
-    
-    # 处理图像
-    masked_image, combined_image, mask = pg.process_image(image)
-    
-    # 保存结果图像
-    cv2.imwrite(output_path, masked_image)
-    
-    # 显示结果图像
-    cv2.imshow("Masked Image", masked_image)
-    cv2.imshow("Combined Image", combined_image)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
-    
-    # 打印布尔数组
-    print("Mask (14x14 bool array):")
-    print(mask)
+    pass

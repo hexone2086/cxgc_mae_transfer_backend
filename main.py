@@ -1,5 +1,6 @@
 import mask
 
+import time
 import cv2
 import zmq
 import zlib
@@ -27,6 +28,9 @@ while True:
     # 将帧送入 mask 函数
     mat1, mat2, patch_means, patch_stds, bool_array = patch_generator.process_image(frame)
 
+    cv2.imshow('mat1', mat1)
+    cv2.imshow('mat2', mat2)
+
     # 使用 PIL 将 mat 数组压缩为 JPEG
     mat1_compressed = cv2.imencode('.jpg', mat1)[1].tobytes()
     mat2_compressed = cv2.imencode('.jpg', mat2)[1].tobytes()
@@ -47,6 +51,7 @@ while True:
 
     # print(mat1.shape, mat2.shape, bool_array.shape, patch_means.shape, patch_stds.shape)
 
+    time.sleep(0.5)
     
     # 发送数据
     socket.send_pyobj(data)
