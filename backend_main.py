@@ -32,18 +32,24 @@ def main():
                 'img_mean': received_data['patch_means'],
                 'img_std': received_data['patch_stds']
             }
-            
+
             logger.info("start infer")
             output = mae_infer.infer(data_dict)
             logger.info("infer completed")
 
-            output = output.transpose(0, 2, 3, 1) # 推理原始输出为 (bcz, 3, 224, 224)
-            n = output.shape[0]
-            for i in range(n):
-                # 限制 output 数值 0-1 防止溢出
-                output[i] = np.clip(output[i], 0, 1)
-                output[i] = (output[i] * 255).astype(np.uint8)
-                cv2.imwrite(f'./output/output_{i}.png', cv2.cvtColor(output[i], cv2.COLOR_RGB2BGR) )
+            output_list = [
+                np.clip(img[0].cpu().numpy().transpose(1, 2, 0), 0, 1) * 255
+                for img in output
+            ]
+            output_list = [img.astype(np.uint8) for img in output_list]
+
+            # output = output.transpose(0, 2, 3, 1) # 推理原始输出为 (bcz, 3, 224, 224)
+            # n = output.shape[0]
+            # for i in range(n):
+            #     # 限制 output 数值 0-1 防止溢出
+            #     output[i] = np.clip(output[i], 0, 1)
+            #     output[i] = (output[i] * 255).astype(np.uint8)
+            #     cv2.imwrite(f'./output/output_{i}.png', cv2.cvtColor(output[i], cv2.COLOR_RGB2BGR) )
         else:
             pass
 

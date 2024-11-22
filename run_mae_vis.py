@@ -10,7 +10,7 @@
 # https://github.com/facebookresearch/deit
 # https://github.com/facebookresearch/dino
 # --------------------------------------------------------'
-#from loguru import logger
+from loguru import logger
 import argparse
 import datetime
 import numpy as np
@@ -78,7 +78,7 @@ def get_args():
     parser.add_argument('--device', default='cuda:0',
                         help='device to use for training / testing')
     parser.add_argument('--imagenet_default_mean_and_std', default=True, action='store_true')
-    parser.add_argument('--mask_ratio', default=0.9, type=float,
+    parser.add_argument('--mask_ratio', default=0.25, type=float,
                         help='ratio of the visual tokens/patches need be masked')
     # Model parameters
     parser.add_argument('--model', default='pretrain_mae_base_patch16_224', type=str, metavar='MODEL',
@@ -99,6 +99,47 @@ def get_model(args):
     )
 
     return model
+
+def save_images(outputs, img, bool_masked_pos, img_std, img_mean, patch_size, save_path, idx, device):
+    """
+    保存原始图像、重建图像和随机掩码图像。
+    """
+    # 保存原始图像
+    mean = torch.as_tensor([0.485, 0.456, 0.406]).to(device)[None, :, None, None]
+    std = torch.as_tensor([0.229, 0.224, 0.225]).to(device)[None, :, None, None]
+    ori_img = img * std + mean  # 将归一化的图像转回 [0, 1]
+    ori_img_pil = ToPILImage()(ori_img[0, :])
+    ori_img_pil.save(f"{save_path}/ori_img_{idx}.jpg")
+    #import pdb;pdb.set_trace()
+    # 处理重建图像
+    img_squeeze = rearrange(ori_img, 'b c (h p1) (w p2) -> b (h w) (p1 p2) c', 
+                            p1=patch_size[0], p2=patch_size[1])
+    img_norm = (img_squeeze - img_mean) / img_std
+    img_patch = rearrange(img_norm, 'b n p c -> b n (p c)')
+    logger.info(f"img_patch shape: {img_patch.shape}")
+    img_patch[bool_masked_pos] = outputs
+
+    # 构造掩码
+    mask_ = torch.ones_like(img_patch)
+    mask_[bool_masked_pos] = 0
+    mask_ = rearrange(mask_, 'b n (p c) -> b n p c', c=3)
+    mask_ = rearrange(mask_, 'b (h w) (p1 p2) c -> b c (h p1) (w p2)', 
+                      p1=patch_size[0], p2=patch_size[1], h=14, w=14)
+
+    # 保存重建图像
+    rec_img = rearrange(img_patch, 'b n (p c) -> b n p c', c=3)
+    rec_img = rec_img * img_std + img_mean  
+    rec_img = rearrange(rec_img, 'b (h w) (p1 p2) c -> b c (h p1) (w p2)', 
+                        p1=patch_size[0], p2=patch_size[1], h=14, w=14)
+    rec_img_pil = ToPILImage()(rec_img[0, :].clip(0, 0.996))
+    rec_img_pil.save(f"{save_path}/rec_img_{idx}.jpg")
+
+    # 保存掩码图像
+    img_mask = rec_img * mask_
+    img_mask_pil = ToPILImage()(img_mask[0, :])
+    img_mask_pil.save(f"{save_path}/mask_img_{idx}.jpg")
+
+    print(f"Images saved to {save_path}")
 
 
 def main(args):
@@ -133,6 +174,12 @@ def main(args):
     bool_masked_pos = torch.from_numpy(1 - mask).view(1, -1).to(device, non_blocking=True).to(torch.bool)
     #bool_masked_pos = 1 - bool_masked_pos
     #import pdb;pdb.set_trace()
+        # 统计 bool_masked_pos 第二个维度中有多少个 true
+    num_true_per_batch = torch.sum(bool_masked_pos, dim=1)
+
+    for i, num_true in enumerate(num_true_per_batch):
+        logger.info(f"Batch {i}: {num_true} true values")
+
 
     with torch.no_grad():
         img = img[None, :]
@@ -140,50 +187,27 @@ def main(args):
         img = img.to(device, non_blocking=True)
         img_ = rearrange(img, 'b c (h ph) (w pw) -> b (h w) (ph pw c)', ph=16, pw=16)
         # bool_masked_pos = bool_masked_pos.to(device, non_blocking=True).flatten(1).to(torch.bool)
-        
-        outputs = model(img_, bool_masked_pos)
-        import pdb;pdb.set_trace()
-        #save original img
-        mean = torch.as_tensor(IMAGENET_DEFAULT_MEAN).to(device)[None, :, None, None]
-        std = torch.as_tensor(IMAGENET_DEFAULT_STD).to(device)[None, :, None, None]
-        ori_img = img * std + mean  # in [0, 1]
-        img = ToPILImage()(ori_img[0, :])
-        img.save(f"{args.save_path}/ori_img.jpg")
-##############################
+        img4 = img.repeat(4, 1, 1, 1) #复制四份
+        logger.debug(f" final img shape: {img4.shape}")
+        img_4=img_.repeat(4, 1, 1) #复制四份
+        logger.debug(f" final img_ shape: {img_4.shape}")
+        bool_masked_pos4 = bool_masked_pos.repeat(4,1)#复制四份
+        logger.debug(f" final bool_masked_pos shape: {bool_masked_pos4.shape}")
+
+        outputs = model(img_4, bool_masked_pos4)
+        # import pdb;pdb.set_trace()
         img_mean = np.load(args.img_mean_path)
-    
-        img_mean = torch.as_tensor(img_mean, dtype=torch.float32).to(device)
+        img_mean = torch.as_tensor(img_mean, dtype=torch.float32).repeat(4, 1, 1,1).to(device)
         img_std = np.load(args.img_std_path)
-        img_std = torch.as_tensor(img_std, dtype=torch.float32).to(device)
-        img_squeeze = rearrange(ori_img, 'b c (h p1) (w p2) -> b (h w) (p1 p2) c', p1=patch_size[0], p2=patch_size[0])
-        img_norm = (img_squeeze - img_mean) / img_std
-        img_patch = rearrange(img_norm, 'b n p c -> b n (p c)')
-        img_patch[bool_masked_pos] = outputs
+        img_std = torch.as_tensor(img_std, dtype=torch.float32).repeat(4, 1, 1,1).to(device)
 
-        #make mask
-        mask_ = torch.ones_like(img_patch)
-        mask_[bool_masked_pos] = 0
-        mask_ = rearrange(mask_, 'b n (p c) -> b n p c', c=3)
-        mask_ = rearrange(mask_, 'b (h w) (p1 p2) c -> b c (h p1) (w p2)', p1=patch_size[0], p2=patch_size[1], h=14, w=14)
+        logger.debug(f" final outputs shape: {outputs.shape}")
+        logger.debug(f" final img_mean shape: {img_mean.shape}")
+        logger.debug(f" final img_std shape: {img_std.shape}")
 
-        #save reconstruction img
-        rec_img = rearrange(img_patch, 'b n (p c) -> b n p c', c=3)
-
-        # Notice: To visualize the reconstruction image, we add the predict and the original mean and var of each patch. Issue #40
-        rec_img = rec_img * img_std + img_mean
-
-        
-        rec_img = rearrange(rec_img, 'b (h w) (p1 p2) c -> b c (h p1) (w p2)', p1=patch_size[0], p2=patch_size[1], h=14, w=14)
-        img = ToPILImage()(rec_img[0, :].clip(0,0.996))
-        img.save(f"{args.save_path}/rec_img.jpg")
-
-######################################
-        #save random mask img
-        img_mask = rec_img * mask_
-        img = ToPILImage()(img_mask[0, :])
-        img.save(f"{args.save_path}/mask_img.jpg")
-
-        #logger.info(f"save image to {args.save_path}")
+        for i in range(len(img4)):
+            save_images(outputs[i:i+1], img4[i:i+1], bool_masked_pos4[i:i+1], img_std[i:i+1], img_mean[i:i+1], patch_size=(16, 16), 
+                save_path=args.save_path, idx=i, device=device)
 
 if __name__ == '__main__':
     opts = get_args()

@@ -28,6 +28,7 @@ class MAEVisualization:
 
         self.model = self.get_model()
         self.patch_size = self.model.encoder.patch_embed.patch_size
+        logger.info("Patch size = %s" % str(self.patch_size))
         self.window_size = (self.input_size // self.patch_size[0], self.input_size // self.patch_size[1])
 
         self.model.to(self.device)
@@ -77,68 +78,140 @@ class MAEVisualization:
         )
         return model
 
+    def save_images(self, outputs, img, bool_masked_pos, img_std, img_mean, img_list, idx):
+        """
+        保存原始图像、重建图像和随机掩码图像。
+        """
+        # 保存原始图像
+        mean = torch.as_tensor([0.485, 0.456, 0.406]).to(self.device)[None, :, None, None]
+        std = torch.as_tensor([0.229, 0.224, 0.225]).to(self.device)[None, :, None, None]
+        ori_img = img * std + mean  # 将归一化的图像转回 [0, 1]
+
+        # 处理重建图像
+        img_squeeze = rearrange(ori_img, 'b c (h p1) (w p2) -> b (h w) (p1 p2) c', 
+                                p1=self.patch_size[0], p2=self.patch_size[1])
+        img_norm = (img_squeeze - img_mean) / img_std
+        img_patch = rearrange(img_norm, 'b n p c -> b n (p c)')
+        # logger.debug(f"img_patch shape: {img_patch.shape}")
+        img_patch[bool_masked_pos] = outputs
+
+        # 构造掩码
+        mask_ = torch.ones_like(img_patch)
+        mask_[bool_masked_pos] = 0
+        mask_ = rearrange(mask_, 'b n (p c) -> b n p c', c=3)
+        mask_ = rearrange(mask_, 'b (h w) (p1 p2) c -> b c (h p1) (w p2)', 
+                        p1=self.patch_size[0], p2=self.patch_size[1], h=14, w=14)
+
+        
+        rec_img = rearrange(img_patch, 'b n (p c) -> b n p c', c=3)
+        rec_img = rec_img * img_std + img_mean  
+        rec_img = rearrange(rec_img, 'b (h w) (p1 p2) c -> b c (h p1) (w p2)', 
+                            p1=self.patch_size[0], p2=self.patch_size[1], h=14, w=14)
+        # logger.debug(f"rec_img shape: {rec_img.shape}")
+
+        # 保存重建图像
+        rec_img_pil = ToPILImage()(rec_img[0, :].clip(0, 0.996))
+        rec_img_pil.save(f"./output/rec_img_{idx}.jpg")    
+        # 保存掩码图像
+        img_mask = rec_img * mask_
+        img_mask_pil = ToPILImage()(img_mask[0, :])
+        img_mask_pil.save(f"./output/mask_img_{idx}.jpg")
+
+
+
+        img_list.append(rec_img)
+
+
     def infer(self, data_dict):
         remaining_image = data_dict['remaining_image']
         mask = data_dict['mask']
         img_mean = data_dict['img_mean']
         img_std = data_dict['img_std']
+        
+        # 复制四份
+        img_list = []
+        for _ in range(4):
+            restored_image = self.restore_image(remaining_image, mask)
+            img_t = Image.fromarray(restored_image)
+            img_t, _ = self.transforms(img_t)
+            # logger.debug(img_t.shape)
+            img_t = img_t[None, :]
+            img_list.append(img_t)
+        img = torch.cat(img_list, dim=0)
 
-        restored_image = self.restore_image(remaining_image, mask)
-        img = Image.fromarray(restored_image)
-        img, _ = self.transforms(img)
-        bool_masked_pos = torch.from_numpy(1 - mask).view(1, -1).to(self.device, non_blocking=True).to(torch.bool)
+        # 复制四份
+        mask_list = []
+        for _ in range(4):
+            mask_t = torch.from_numpy(1 - mask).view(1, -1).to(self.device, non_blocking=True).to(torch.bool)
+            mask_list.append(mask_t)
+        bool_masked_pos = torch.cat(mask_list, dim=0)
+
+
+        std_t = []
+        mean_t = []
+        for _ in range(4):
+            std_t.append(img_std)
+            mean_t.append(img_mean)
+        img_std = np.concatenate(std_t, axis=0)
+        img_mean = np.concatenate(mean_t, axis=0)
+
 
         with torch.no_grad():
-            img = img[None, :]
+            # img shape: (n, 3, 224, 224)
+            # img_ shape: (n, 196, 768)         
+            # bool_masked_pos shape: (n, 196)
+            # outputs shape: (n, 47, 768)
+            # img_mean shape: (n, 196, 1, 3)
+            # img_std shape: (n, 196, 1, 3)
+
             img = img.to(self.device, non_blocking=True)
             img_ = rearrange(img, 'b c (h ph) (w pw) -> b (h w) (ph pw c)', ph=16, pw=16)
+
+            # logger.debug(f"img shape: {img.shape}")
+            # logger.debug(f"img_ shape: {img_.shape}")
+            # logger.debug(f"bool_masked_pos shape: {bool_masked_pos.shape}")
+
             outputs = self.model(img_, bool_masked_pos)
+            # logger.debug(f"outputs shape: {outputs.shape}")
 
             # Save original image
             mean = torch.as_tensor(IMAGENET_DEFAULT_MEAN).to(self.device)[None, :, None, None]
             std = torch.as_tensor(IMAGENET_DEFAULT_STD).to(self.device)[None, :, None, None]
             ori_img = img * std + mean  # in [0, 1]
 
+            logger.debug(ori_img.shape)
+
             # Save reconstruction image
-            img_mean = np.copy(img_mean)  # 复制 NumPy 数组以使其可写
-            img_std = np.copy(img_std)  # 复制 NumPy 数组以使其可写
+            img_mean = np.copy(img_mean)
+            img_std = np.copy(img_std)
             img_mean = torch.as_tensor(img_mean, dtype=torch.float32).to(self.device)
             img_std = torch.as_tensor(img_std, dtype=torch.float32).to(self.device)
+            logger.debug(f"img_mean shape: {img_mean.shape}")
+            logger.debug(f"img_std shape: {img_std.shape}")
+
             img_squeeze = rearrange(ori_img, 'b c (h p1) (w p2) -> b (h w) (p1 p2) c', p1=self.patch_size[0], p2=self.patch_size[0])
             img_norm = (img_squeeze - img_mean) / img_std
             img_patch = rearrange(img_norm, 'b n p c -> b n (p c)')
-            img_patch[bool_masked_pos] = outputs
+            logger.debug(f"img_patch shape: {img_patch.shape}")
 
-            mask_ = torch.ones_like(img_patch)
-            mask_[bool_masked_pos] = 0
-            mask_ = rearrange(mask_, 'b n (p c) -> b n p c', c=3)
-            mask_ = rearrange(mask_, 'b (h w) (p1 p2) c -> b c (h p1) (w p2)', p1=self.patch_size[0], p2=self.patch_size[1], h=14, w=14)
+            rec_img_list = []
 
-            rec_img = rearrange(img_patch, 'b n (p c) -> b n p c', c=3)
-            rec_img = rec_img * img_std + img_mean
-            rec_img = rearrange(rec_img, 'b (h w) (p1 p2) c -> b c (h p1) (w p2)', p1=self.patch_size[0], p2=self.patch_size[1], h=14, w=14)
+            for i in range(len(img)):
+                self.save_images(outputs[i:i+1], img[i:i+1], bool_masked_pos[i:i+1], img_std[i:i+1], img_mean[i:i+1], rec_img_list,idx=i)
 
-            return rec_img.cpu().numpy()
+            return rec_img_list
 
 if __name__ == '__main__':
     mae_vis = MAEVisualization(
-        model_path='path/to/model'
+        model_path='./model/checkpoint-1599.pth',
+        mask_ratio=0.75
     )
 
     data_dict = {
-        'remaining_image': np.load('path/to/remaining_image.npy'),
-        'mask': np.load('path/to/mask.npy'),
-        'img_mean': np.load('path/to/img_mean.npy'),
-        'img_std': np.load('path/to/img_std.npy')
+        'remaining_image': np.load('./input/combined_image_w.npy'),
+        'mask': np.load('./input/mask_positions.npy'),
+        'img_mean': np.load('./input/patch_means.npy'),
+        'img_std': np.load('./input/patch_stds.npy')
     }
 
-    output_image = mae_vis.infer(data_dict)
-    logger.info(f"Inference completed. Output image shape: {output_image.shape}")
-
-    # 将输出图像转换为 OpenCV 的 cv2.Mat 格式并显示
-    output_image_cv = (output_image * 255).astype(np.uint8)
-    output_image_cv = cv2.cvtColor(output_image_cv, cv2.COLOR_RGB2BGR)
-
-    cv2.imshow('Reconstructed Image', output_image_cv)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+    output = mae_vis.infer(data_dict)
