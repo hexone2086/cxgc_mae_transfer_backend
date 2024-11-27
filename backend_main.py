@@ -38,9 +38,11 @@ def main():
 
                 data_dict_list.append(data_dict)
 
+            start_time = time.time()
             logger.info("start infer")
             output = mae_infer.infer(data_dict_list)
-            logger.info("infer completed")
+            end_time = time.time()
+            logger.info(f"infer completed, use: {end_time - start_time}s")
 
             output_list = [
                 np.clip(img[0].cpu().numpy().transpose(1, 2, 0), 0, 1) * 255

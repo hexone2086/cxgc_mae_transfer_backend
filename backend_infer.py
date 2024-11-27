@@ -23,6 +23,9 @@ class MAEVisualization:
         self.model_name = model_name
         self.drop_path = drop_path
 
+        if not torch.cuda.is_available():
+            self.device = 'cpu'
+            logger.warning(f"cuda is not available, use cpu instead")
         self.device = torch.device(self.device)
         cudnn.benchmark = True
 
@@ -156,10 +159,10 @@ class MAEVisualization:
         img_std = np.concatenate(std_list, axis=0)
         img_mean = np.concatenate(mean_list, axis=0)
 
-        logger.debug(f"img shape: {img.shape}")
-        logger.debug(f"bool_masked_pos shape: {bool_masked_pos.shape}")
-        logger.debug(f"img_mean shape: {img_mean.shape}")
-        logger.debug(f"img_std shape: {img_std.shape}")
+        # logger.debug(f"img shape: {img.shape}")
+        # logger.debug(f"bool_masked_pos shape: {bool_masked_pos.shape}")
+        # logger.debug(f"img_mean shape: {img_mean.shape}")
+        # logger.debug(f"img_std shape: {img_std.shape}")
 
         # remaining_image = data_dict['remaining_image']
         # mask = data_dict['mask']
@@ -217,26 +220,26 @@ class MAEVisualization:
             std = torch.as_tensor(IMAGENET_DEFAULT_STD).to(self.device)[None, :, None, None]
             ori_img = img * std + mean  # in [0, 1]
 
-            logger.debug(ori_img.shape)
+            # logger.debug(ori_img.shape)
 
             # Save reconstruction image
             img_mean = np.copy(img_mean)
             img_std = np.copy(img_std)
             img_mean = torch.as_tensor(img_mean, dtype=torch.float32).to(self.device)
             img_std = torch.as_tensor(img_std, dtype=torch.float32).to(self.device)
-            logger.debug(f"img_mean shape: {img_mean.shape}")
-            logger.debug(f"img_std shape: {img_std.shape}")
+            # logger.debug(f"img_mean shape: {img_mean.shape}")
+            # logger.debug(f"img_std shape: {img_std.shape}")
 
             img_squeeze = rearrange(ori_img, 'b c (h p1) (w p2) -> b (h w) (p1 p2) c', p1=self.patch_size[0], p2=self.patch_size[0])
             img_norm = (img_squeeze - img_mean) / img_std
             img_patch = rearrange(img_norm, 'b n p c -> b n (p c)')
-            logger.debug(f"img_patch shape: {img_patch.shape}")
+            # logger.debug(f"img_patch shape: {img_patch.shape}")
 
             rec_img_list = []
 
-            logger.debug(f"idx of image: {len(img)}")
-            for i in range(len(img)):
-                self.save_images(outputs[i:i+1], img[i:i+1], bool_masked_pos[i:i+1], img_std[i:i+1], img_mean[i:i+1], rec_img_list,idx=i)
+            # # logger.debug(f"idx of image: {len(img)}")
+            # for i in range(len(img)):
+            #     self.save_images(outputs[i:i+1], img[i:i+1], bool_masked_pos[i:i+1], img_std[i:i+1], img_mean[i:i+1], rec_img_list,idx=i)
 
             return rec_img_list
 

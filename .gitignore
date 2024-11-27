@@ -196,6 +196,7 @@ pyrightconfig.json
 
 ### test data & inference weight
 input/*
-output/*
-model/*
+output/*.jpg
+output/*.png
+model/*.pth
 example.npy
