@@ -22,19 +22,24 @@ def main():
     mae_infer = MAEVisualization(model_path='model/checkpoint-1599.pth',)
 
     while True:
-        if len(req.buffer) > 0:
-            received_data = req.buffer.pop()
+        data_dict_list = []
 
-            # 创建字典，用于送入推理模块
-            data_dict = {
-                'remaining_image': received_data['mat2'],
-                'mask': received_data['bool_array'],
-                'img_mean': received_data['patch_means'],
-                'img_std': received_data['patch_stds']
-            }
+        if len(req.buffer) > 3:
+            for i in range(4):
+                received_data = req.buffer.pop()
+
+                # 创建字典，用于送入推理模块
+                data_dict = {
+                    'remaining_image': received_data['mat2'],
+                    'mask': received_data['bool_array'],
+                    'img_mean': received_data['patch_means'],
+                    'img_std': received_data['patch_stds']
+                }
+
+                data_dict_list.append(data_dict)
 
             logger.info("start infer")
-            output = mae_infer.infer(data_dict)
+            output = mae_infer.infer(data_dict_list)
             logger.info("infer completed")
 
             output_list = [
@@ -43,13 +48,9 @@ def main():
             ]
             output_list = [img.astype(np.uint8) for img in output_list]
 
-            # output = output.transpose(0, 2, 3, 1) # 推理原始输出为 (bcz, 3, 224, 224)
-            # n = output.shape[0]
-            # for i in range(n):
-            #     # 限制 output 数值 0-1 防止溢出
-            #     output[i] = np.clip(output[i], 0, 1)
-            #     output[i] = (output[i] * 255).astype(np.uint8)
-            #     cv2.imwrite(f'./output/output_{i}.png', cv2.cvtColor(output[i], cv2.COLOR_RGB2BGR) )
+            for i in range(len(output_list)):
+                cv2.imwrite(f'output/{i}.png', cv2.cvtColor(output_list[i], cv2.COLOR_BGR2RGB))
+
         else:
             pass
 

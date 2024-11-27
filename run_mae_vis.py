@@ -13,14 +13,15 @@
 from loguru import logger
 import argparse
 import datetime
+from scipy.ndimage import gaussian_filter
 import numpy as np
 import time
 import torch
 import torch.backends.cudnn as cudnn
 import json
 import os
-
-from PIL import Image
+import cv2
+from PIL import Image, ImageFilter
 
 from pathlib import Path
 
@@ -131,13 +132,26 @@ def save_images(outputs, img, bool_masked_pos, img_std, img_mean, patch_size, sa
     rec_img = rec_img * img_std + img_mean  
     rec_img = rearrange(rec_img, 'b (h w) (p1 p2) c -> b c (h p1) (w p2)', 
                         p1=patch_size[0], p2=patch_size[1], h=14, w=14)
-    rec_img_pil = ToPILImage()(rec_img[0, :].clip(0, 0.996))
-    rec_img_pil.save(f"{save_path}/rec_img_{idx}.jpg")
+############
+    # 转换为 NumPy 格式
+    rec_img_np = rec_img.cpu().numpy()  # 假设 rec_img 是一个 torch.Tensor
 
-    # 保存掩码图像
-    img_mask = rec_img * mask_
-    img_mask_pil = ToPILImage()(img_mask[0, :])
-    img_mask_pil.save(f"{save_path}/mask_img_{idx}.jpg")
+    # 对每个通道应用高斯滤波
+    rec_img_smoothed = np.zeros_like(rec_img_np)
+    for b in range(rec_img_np.shape[0]):  # 遍历 batch
+        for c in range(rec_img_np.shape[1]):  # 遍历通道
+            rec_img_smoothed[b, c] = gaussian_filter(rec_img_np[b, c], sigma=2.0)  # 调整 sigma 减弱块状痕迹
+
+    # 转换回 PyTorch 格式
+    rec_img_smoothed = torch.from_numpy(rec_img_smoothed).to(device)
+###########
+    # rec_img_pil = ToPILImage()(rec_img_smoothed[0, :].clip(0, 0.996))
+    # rec_img_pil.save(f"{save_path}/rec_img_{idx}.jpg")
+
+    # # 保存掩码图像
+    # img_mask = rec_img * mask_
+    # img_mask_pil = ToPILImage()(img_mask[0, :])
+    # img_mask_pil.save(f"{save_path}/mask_img_{idx}.jpg")
 
     print(f"Images saved to {save_path}")
 

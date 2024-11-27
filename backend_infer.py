@@ -122,38 +122,76 @@ class MAEVisualization:
         img_list.append(rec_img)
 
 
-    def infer(self, data_dict):
-        remaining_image = data_dict['remaining_image']
-        mask = data_dict['mask']
-        img_mean = data_dict['img_mean']
-        img_std = data_dict['img_std']
-        
-        # 复制四份
+    def infer(self, data_dict_list):
+
         img_list = []
-        for _ in range(4):
+        mask_list = []
+        std_list = []
+        mean_list = []
+
+        # FIXME 方差均值可能有误
+        for i in range(len(data_dict_list)):
+            data_dict = data_dict_list[i]
+            remaining_image = data_dict['remaining_image']
+            mask = data_dict['mask']
+            img_mean = data_dict['img_mean']
+            img_std = data_dict['img_std']
+
+            # 压入数据到列表中
             restored_image = self.restore_image(remaining_image, mask)
             img_t = Image.fromarray(restored_image)
             img_t, _ = self.transforms(img_t)
             # logger.debug(img_t.shape)
             img_t = img_t[None, :]
             img_list.append(img_t)
-        img = torch.cat(img_list, dim=0)
 
-        # 复制四份
-        mask_list = []
-        for _ in range(4):
             mask_t = torch.from_numpy(1 - mask).view(1, -1).to(self.device, non_blocking=True).to(torch.bool)
             mask_list.append(mask_t)
+
+            std_list.append(img_std)
+            mean_list.append(img_mean)
+
+        img = torch.cat(img_list, dim=0)
         bool_masked_pos = torch.cat(mask_list, dim=0)
+        img_std = np.concatenate(std_list, axis=0)
+        img_mean = np.concatenate(mean_list, axis=0)
+
+        logger.debug(f"img shape: {img.shape}")
+        logger.debug(f"bool_masked_pos shape: {bool_masked_pos.shape}")
+        logger.debug(f"img_mean shape: {img_mean.shape}")
+        logger.debug(f"img_std shape: {img_std.shape}")
+
+        # remaining_image = data_dict['remaining_image']
+        # mask = data_dict['mask']
+        # img_mean = data_dict['img_mean']
+        # img_std = data_dict['img_std']
+        
+        # # 复制四份
+        # img_list = []
+        # for _ in range(4):
+        #     restored_image = self.restore_image(remaining_image, mask)
+        #     img_t = Image.fromarray(restored_image)
+        #     img_t, _ = self.transforms(img_t)
+        #     # logger.debug(img_t.shape)
+        #     img_t = img_t[None, :]
+        #     img_list.append(img_t)
+        # img = torch.cat(img_list, dim=0)
+
+        # # 复制四份
+        # mask_list = []
+        # for _ in range(4):
+        #     mask_t = torch.from_numpy(1 - mask).view(1, -1).to(self.device, non_blocking=True).to(torch.bool)
+        #     mask_list.append(mask_t)
+        # bool_masked_pos = torch.cat(mask_list, dim=0)
 
 
-        std_t = []
-        mean_t = []
-        for _ in range(4):
-            std_t.append(img_std)
-            mean_t.append(img_mean)
-        img_std = np.concatenate(std_t, axis=0)
-        img_mean = np.concatenate(mean_t, axis=0)
+        # std_t = []
+        # mean_t = []
+        # for _ in range(4):
+        #     std_t.append(img_std)
+        #     mean_t.append(img_mean)
+        # img_std = np.concatenate(std_t, axis=0)
+        # img_mean = np.concatenate(mean_t, axis=0)
 
 
         with torch.no_grad():
@@ -196,6 +234,7 @@ class MAEVisualization:
 
             rec_img_list = []
 
+            logger.debug(f"idx of image: {len(img)}")
             for i in range(len(img)):
                 self.save_images(outputs[i:i+1], img[i:i+1], bool_masked_pos[i:i+1], img_std[i:i+1], img_mean[i:i+1], rec_img_list,idx=i)
 
