@@ -1,3 +1,4 @@
+import time
 import cv2
 import numpy as np
 import torch
@@ -13,8 +14,10 @@ from einops import rearrange
 from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 from loguru import logger
 
+from backend_utils import infer_output
+
 class MAEVisualization:
-    def __init__(self, model_path, input_size=224, device='cuda:0', imagenet_default_mean_and_std=True, mask_ratio=0.9,
+    def __init__(self, model_path, data_queue_in, input_size=224, device='cuda:0', imagenet_default_mean_and_std=True, mask_ratio=0.9,
                  model_name='pretrain_mae_base_patch16_224', drop_path=0.0):
         self.input_size = input_size
         self.device = device
@@ -22,6 +25,7 @@ class MAEVisualization:
         self.mask_ratio = mask_ratio
         self.model_name = model_name
         self.drop_path = drop_path
+        self.data_queue = data_queue_in
 
         if not torch.cuda.is_available():
             self.device = 'cpu'
@@ -112,13 +116,13 @@ class MAEVisualization:
                             p1=self.patch_size[0], p2=self.patch_size[1], h=14, w=14)
         # logger.debug(f"rec_img shape: {rec_img.shape}")
 
-        # 保存重建图像
-        rec_img_pil = ToPILImage()(rec_img[0, :].clip(0, 0.996))
-        rec_img_pil.save(f"./output/rec_img_{idx}.jpg")    
-        # 保存掩码图像
-        img_mask = rec_img * mask_
-        img_mask_pil = ToPILImage()(img_mask[0, :])
-        img_mask_pil.save(f"./output/mask_img_{idx}.jpg")
+        # # 保存重建图像
+        # rec_img_pil = ToPILImage()(rec_img[0, :].clip(0, 0.996))
+        # rec_img_pil.save(f"./output/rec_img_{idx}.jpg")    
+        # # 保存掩码图像
+        # img_mask = rec_img * mask_
+        # img_mask_pil = ToPILImage()(img_mask[0, :])
+        # img_mask_pil.save(f"./output/mask_img_{idx}.jpg")
 
 
 
@@ -238,10 +242,51 @@ class MAEVisualization:
             rec_img_list = []
 
             # # logger.debug(f"idx of image: {len(img)}")
-            # for i in range(len(img)):
-            #     self.save_images(outputs[i:i+1], img[i:i+1], bool_masked_pos[i:i+1], img_std[i:i+1], img_mean[i:i+1], rec_img_list,idx=i)
+            for i in range(len(img)):
+                self.save_images(outputs[i:i+1], img[i:i+1], bool_masked_pos[i:i+1], img_std[i:i+1], img_mean[i:i+1], rec_img_list,idx=i)
 
             return rec_img_list
+    
+    def worker(self):
+        while True:
+            data_dict_list = []
+
+            if len(self.data_queue) > 3:
+                for i in range(4):
+                    received_data = self.data_queue.popleft()
+
+                    # 创建字典，用于送入推理模块
+                    data_dict = {
+                        'remaining_image': received_data['mat2'],
+                        'mask': received_data['bool_array'],
+                        'img_mean': received_data['patch_means'],
+                        'img_std': received_data['patch_stds']
+                    }
+
+                    data_dict_list.append(data_dict)
+
+                start_time = time.time()
+                logger.info("start infer")
+                output = self.infer(data_dict_list)
+                end_time = time.time()
+                logger.info(f"infer completed, use: {end_time - start_time}s")
+
+                output_list = [
+                    np.clip(img[0].cpu().numpy().transpose(1, 2, 0), 0, 1) * 255
+                    for img in output
+                ]
+                output_list = [img.astype(np.uint8) for img in output_list]
+                
+                for i in range(len(output_list)):
+                    infer_output.append(output_list[i])
+
+                logger.info(f"infer_output len {len(infer_output)}")
+
+                # for i in range(len(output_list)):
+                #     cv2.imwrite(f'output/{i}.png', cv2.cvtColor(output_list[i], cv2.COLOR_BGR2RGB))
+
+            else:
+                pass
 
 if __name__ == '__main__':
     mae_vis = MAEVisualization(

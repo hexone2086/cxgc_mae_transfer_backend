@@ -37,6 +37,7 @@ class ThreadSafeBuffer:
         with self.lock:
             return iter(self.buffer)
 
+infer_output = ThreadSafeBuffer(max_size=120)
 
 if __name__ == '__main__':
 
